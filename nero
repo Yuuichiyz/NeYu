@@ -1,10 +1,10 @@
 #!/data/data/com.termux/files/usr/bin/bash
 
-# [PROTOCOLO DE AUTORIZAÇÃO] Concede permissões de uso ao Termux e ao ADB Shell automaticamente [cite: 1]
+# [PROTOCOLO DE AUTORIZAÇÃO] Concede permissões de uso ao Termux e ao ADB Shell automaticamente
 adb shell "pm grant com.termux android.permission.PACKAGE_USAGE_STATS" 2>/dev/null
 adb shell "appops set com.termux GET_USAGE_STATS allow" 2>/dev/null
 
-# Paleta de Cores Platinum Neon [cite: 1]
+# Paleta de Cores Platinum Neon
 VERDE='\033[1;32m'
 BRANCO='\033[1;37m'
 AMARELO='\033[1;33m'
@@ -152,72 +152,94 @@ usage_record_scan() {
 
 system_integrity_scan() {
     header
-    echo -e "${PURPLE}═══ AUDITORIA DE INTEGRIDADE, KERNEL E ROOT ═══${RESET}"
-    progress_bar "ESCANEANDO AMBIENTE DO SISTEMA"
+    echo -e "${PURPLE}═══ AUDITORIA EXTENSIVA DE INTEGRIDADE E HARDWARE ═══${RESET}"
+    progress_bar "MAPEANDO AMBIENTE DO SISTEMA"
     local INTEGRITY_FAIL=0
 
-    echo -e "\n${BRANCO}[ AUDITORIA DE DATA E HORÁRIO ]${RESET}"
+    # Identificação do Dispositivo
+    local BRAND=$(adb shell "getprop ro.product.brand" 2>/dev/null | tr '[:lower:]' '[:upper:]')
+    local MODEL=$(adb shell "getprop ro.product.model" 2>/dev/null)
+    local FABRICANTE=$(adb shell "getprop ro.product.manufacturer" 2>/dev/null)
+    local ANDROID_VER=$(adb shell "getprop ro.build.version.release" 2>/dev/null)
+    local SDK_VER=$(adb shell "getprop ro.build.version.sdk" 2>/dev/null)
+    local SERIAL=$(adb shell "getprop ro.serialno" 2>/dev/null)
+
+    echo -e "\n${BRANCO}[ INFORMAÇÕES DO DISPOSITIVO ]${RESET}"
+    echo -e "  ${CYAN}├─ Marca:      ${RESET}$BRAND"
+    echo -e "  ${CYAN}├─ Fabricante: ${RESET}$FABRICANTE"
+    echo -e "  ${CYAN}├─ Modelo:     ${RESET}$MODEL"
+    echo -e "  ${CYAN}├─ Versão:     ${RESET}Android $ANDROID_VER (API $SDK_VER)"
+    echo -e "  ${CYAN}└─ S/N:        ${RESET}$SERIAL"
+
+    # Auditoria de Kernel (Stock vs Custom)
+    echo -e "\n${BRANCO}[ ANÁLISE DE NÚCLEO (KERNEL) ]${RESET}"
+    local KERNEL_NAME=$(adb shell "uname -r" 2>/dev/null)
+    local KERNEL_VER=$(adb shell "uname -v" 2>/dev/null)
+    
+    # Detecção profunda baseada em strings comuns de custom kernels
+    if [[ "$KERNEL_NAME" == *"perf"* || "$KERNEL_NAME" == *"generic"* || "$KERNEL_VER" == *"PREEMPT"* ]]; then
+        echo -e "  ${VERDE}✔ STATUS: KERNEL ÍNTEGRO (STOCK DETECTADO)${RESET}"
+        echo -e "  ${CYAN}└─ Assinatura:${RESET} $KERNEL_NAME"
+    else
+        echo -e "  ${RED}✖ STATUS: KERNEL MODIFICADO (CUSTOM DETECTADO)${RESET}"
+        echo -e "  ${AMARELO}⚠ Alerta: Kernels modificados podem ocultar Root e Scripts.${RESET}"
+        echo -e "  ${CYAN}└─ Assinatura:${RESET} $KERNEL_NAME | $KERNEL_VER"
+        INTEGRITY_FAIL=1
+    fi
+
+    # Auditoria de Bootloader
+    echo -e "\n${BRANCO}[ ESTADO DO BOOTLOADER ]${RESET}"
+    local UNLOCKED=$(adb shell "getprop ro.boot.flash.locked" 2>/dev/null)
+    local VERITY=$(adb shell "getprop ro.boot.vbmeta.device_state" 2>/dev/null)
+    
+    if [[ "$UNLOCKED" == "0" || "$VERITY" == "unlocked" ]]; then
+        echo -e "  ${RED}✖ BOOTLOADER: DESBLOQUEADO (UNLOCKED)${RESET}"
+        echo -e "  ${AMARELO}⚠ Risco: O sistema permite a instalação de kernels e ROMs modificadas.${RESET}"
+        INTEGRITY_FAIL=1
+    else
+        echo -e "  ${VERDE}✔ BOOTLOADER: BLOQUEADO (LOCKED)${RESET}"
+    fi
+
+    # Auditoria de Horário e Vida do Sistema
+    echo -e "\n${BRANCO}[ DATA, HORÁRIO E VIDA DO SISTEMA ]${RESET}"
     local TZ_INFO=$(adb shell "getprop persist.sys.timezone" 2>/dev/null)
-    local DATE_AUTO=$(adb shell "settings get global auto_time" 2>/dev/null)
+    local UPTIME=$(adb shell "uptime" 2>/dev/null)
     echo -ne "  ${BRANCO}TIMEZONE:${RESET} $TZ_INFO "
     if [[ "$TZ_INFO" == *"Sao_Paulo"* || "$TZ_INFO" == *"Brasilia"* || "$TZ_INFO" == *"GMT-03:00"* ]]; then
         echo -e "${VERDE}(HORÁRIO DE BRASÍLIA VÁLIDO)${RESET}"
     else
-        echo -e "${RED}(ALERTA: FORA DO HORÁRIO DE BRASÍLIA)${RESET}"
-        echo -e "  ${AMARELO}⚠ NOTA: Fuso incorreto indica tentativa de bypass em logs.${RESET}"
+        echo -e "${RED}(FORA DO HORÁRIO DE BRASÍLIA)${RESET}"
+        echo -e "  ${AMARELO}⚠ Nota: Fuso incorreto indica tentativa de bypass em logs.${RESET}"
         INTEGRITY_FAIL=1
     fi
-    [ "$DATE_AUTO" == "1" ] && echo -e "  ${VERDE}✔ Data Automática: Ativada${RESET}" || { echo -e "  ${RED}✖ Data Automática: DESATIVADA (RISCO)${RESET}"; INTEGRITY_FAIL=1; }
+    echo -e "  ${CYAN}└─ Tempo de Atividade (Uptime):${RESET} $UPTIME"
 
-    echo -e "\n${BRANCO}[ CONFIGURAÇÕES DE DESENVOLVEDOR ]${RESET}"
-    local DEV_OPT=$(adb shell "settings get global development_settings_enabled" 2>/dev/null)
-    if [ "$DEV_OPT" == "1" ]; then
-        echo -e "  ${RED}✖ Opções de Desenvolvedor: ATIVADO (Sinal de Bypass/ADB)${RESET}"
-        INTEGRITY_FAIL=1
-    else 
-        echo -e "  ${VERDE}✔ Opções de Desenvolvedor: Desativado${RESET}"
-    fi
-
-    local SHIZUKU=$(adb shell "pm list packages | grep -E 'moe.shizuku.privileged.api|rikka.shizuku'")
-    if [ -n "$SHIZUKU" ]; then
-        echo -e "  ${RED}✖ Shizuku/SUI: DETECTADO (Permite acesso root sem Magisk)${RESET}"
-        INTEGRITY_FAIL=1
-    else 
-        echo -e "  ${VERDE}✔ Shizuku/SUI: Não localizado${RESET}"
-    fi
-
-    echo -e "\n${BRANCO}[ KERNEL E BOOTLOADER ]${RESET}"
-    local KERNEL_VER=$(adb shell "uname -r -v" 2>/dev/null)
-    local UNLOCKED=$(adb shell "getprop ro.boot.flash.locked" 2>/dev/null)
-    local VERITY=$(adb shell "getprop ro.boot.vbmeta.device_state" 2>/dev/null)
-    if [[ "$UNLOCKED" == "0" || "$VERITY" == "unlocked" ]]; then
-        echo -e "  ${RED}├─ Bootloader: DESBLOQUEADO / MODIFICADO (Risco Crítico)${RESET}"
-        INTEGRITY_FAIL=1
-    else 
-        echo -e "  ${VERDE}├─ Bootloader: Locked (Stock)${RESET}"
-    fi
+    # Auditoria de Root, Magisk e Patches
+    echo -e "\n${BRANCO}[ GERENCIADORES DE ROOT E MÓDULOS ]${RESET}"
+    local SU_BIN=$(adb shell "ls /system/bin/su /system/xbin/su /data/adb/ksu /data/adb/magisk /data/adb/apatch /data/adb/folkpatch /data/adb/kowsu /data/adb/mambosu /data/adb/rksu /data/adb/suki /data/adb/ksu-next 2>/dev/null")
+    local MAGISK_MODS=$(adb shell "ls /data/adb/modules 2>/dev/null")
     
-    if [[ "$KERNEL_VER" == *"perf"* || "$KERNEL_VER" == *"generic"* ]]; then
-        echo -e "  ${VERDE}└─ Kernel: STOCK KERNEL (Nativo)${RESET}"
-    else 
-        echo -e "  ${RED}└─ Kernel: CUSTOM KERNEL DETECTADO! (Possível Bypass)${RESET} ($KERNEL_VER)"
+    if [ -n "$SU_BIN" ]; then
+        echo -e "  ${RED}✖ BINÁRIO SU: DETECTADO EM CAMINHOS CRÍTICOS!${RESET}"
+        echo -e "     $SU_BIN"
         INTEGRITY_FAIL=1
+    else
+        echo -e "  ${VERDE}✔ Binário SU: Não localizado.${RESET}"
     fi
 
-    echo -e "\n${BRANCO}[ GERENCIADORES DE ROOT E PATCHES ]${RESET}"
-    local ROOT_BINS=$(adb shell "ls /system/bin/su /system/xbin/su /data/adb/ksu /data/adb/magisk /data/adb/apatch /data/adb/folkpatch /data/adb/kowsu /data/adb/mambosu /data/adb/rksu /data/adb/suki /data/adb/ksu-next 2>/dev/null")
-    if [ -n "$ROOT_BINS" ]; then
-        echo -e "  ${RED}└─ DETECTADO: Gerenciadores de Root ativos!${RESET}\n     $ROOT_BINS"
+    if [ -n "$MAGISK_MODS" ]; then
+        echo -e "  ${RED}✖ MÓDULOS MAGISK: ATIVOS E DETECTADOS!${RESET}"
+        echo -e "     $MAGISK_MODS"
         INTEGRITY_FAIL=1
-    else 
-        echo -e "  ${VERDE}└─ Nenhum binário de root localizado${RESET}"
+    else
+        echo -e "  ${VERDE}✔ Módulos: Ambiente sem extensões ativas.${RESET}"
     fi
 
     echo -e "\n${AZUL}──────────────────────────────────────────────────────────────${RESET}"
     if [ "$INTEGRITY_FAIL" -eq 1 ]; then
-        echo -e "${RED}      VEREDITO FINAL: W.O. IMMEDIATE - SISTEMA VIOLADO!${RESET}"
+        echo -e "${RED}      VEREDITO FINAL: SISTEMA VIOLADO / MODIFICADO!${RESET}"
     else 
-        echo -e "${VERDE}      VEREDITO FINAL: TUDO VÁLIDO POR AQUI. AMBIENTE ÍNTEGRO.${RESET}"
+        echo -e "${VERDE}      VEREDITO FINAL: TUDO VÁLIDO. AMBIENTE ÍNTEGRO.${RESET}"
     fi
     echo -e "${AZUL}──────────────────────────────────────────────────────────────${RESET}"
     read -p "Pressione Enter para retornar..."
@@ -312,7 +334,7 @@ menu() {
     echo -e "${BRANCO} [1]${RESET} AUDITORIA: Free Fire Global"
     echo -e "${BRANCO} [2]${RESET} AUDITORIA: Free Fire MAX"
     echo -e "${BRANCO} [3]${RESET} BUSCA BRUTAL (DEEP SCAN)"
-    echo -e "${BRANCO} [4]${RESET} INTEGRITY & W.O. PROTOCOL"
+    echo -e "${BRANCO} [4]${RESET} INTEGRITY, KERNEL & BOOTLOADER"
     echo -e "${BRANCO} [5]${RESET} REGISTRO DE USO (100 APPS)"
     echo -e "${BRANCO} [6]${RESET} CONECTAR: ADB WiFi (IP:Porta)"
     echo -e "${BRANCO} [7]${RESET} SAIR"
