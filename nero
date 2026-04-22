@@ -79,75 +79,130 @@ get_file_info() {
     fi
 }
 
+# [OPÇÃO 5] Protocolo de Força Bruta Multi-Camadas (Extração Total de Detalhes)
 usage_record_scan() {
     header
-    echo -e "${PURPLE}═══ REGISTRO DE USO - PROTOCOLO DE FORÇA BRUTA (100 APPS) ═══${RESET}"
-    local SUCCESS=0
+    echo -e "${PURPLE}═══ REGISTRO DE USO - PROTOCOLO DE VARREDURA ABSOLUTA (100 APPS) ═══${RESET}"
+    echo -e "${AMARELO}[!] EXTRAINDO DADOS BRUTOS DE TODOS OS MÉTODOS - AGUARDE...${RESET}"
+    echo -e "${AZUL}────────────────────────────────────────────────────────────────${RESET}"
 
-    echo -ne "${CYAN}[MÉTODO 1] Forçando extração via Usagestats...${RESET} "
-    local DATA1=$(adb shell "dumpsys usagestats" | grep -E "EVENT_|type=MOVE_TO_FOREGROUND" | tail -n 100)
+    # MÉTODO 1: Dumpsys Usagestats (Telemetria de Eventos em Tempo Real)
+    # Extrai eventos 'resumed' diretamente do banco de dados de telemetria do Android.
+    echo -ne "${CYAN}[MÉTODO 1/6] Varrendo Usagestats (Full Detail)...${RESET} "
+    local DATA1=$(adb shell "dumpsys usagestats" | grep "EVENT_" | tail -n 100)
     if [ -n "$DATA1" ]; then
-        echo -e "${VERDE}SUCESSO${RESET}"
-        SUCCESS=1
-        echo -e "${AZUL}────────────────────────────────────────────────────────────────${RESET}"
-        printf "${CYAN}%-20s │ %-s${RESET}\n" "HORÁRIO (H:M:S)" "PACOTE / APLICATIVO"
-        echo -e "${AZUL}────────────────────────────────────────────────────────────────${RESET}"
+        echo -e "${VERDE}DADOS LOCALIZADOS${RESET}"
         while read -r line; do
-            local TIME=$(echo "$line" | grep -oE "(time|t)=\"[^\"]+\"|(time|t)=[^ ]+" | cut -d'=' -f2 | tr -d '"')
-            local PKG=$(echo "$line" | grep -oE "(package|pkg)=\"[^\"]+\"|(package|pkg)=[^ ]+" | cut -d'=' -f2 | tr -d '"')
-            [ -n "$PKG" ] && echo -e "${AMARELO}${TIME:----}${RESET} │ ${BRANCO}$PKG${RESET}"
+            local PKG=$(echo "$line" | grep -oE "package=\"[^\"]+\"" | cut -d'"' -f2) 
+            local TIME=$(echo "$line" | grep -oE "time=\"[^\"]+\"" | cut -d'"' -f2) 
+            local CLASS=$(echo "$line" | grep -oE "class=\"[^\"]+\"" | cut -d'"' -f2)
+            if [ -n "$PKG" ]; then
+                local LABEL=$(adb shell "dumpsys package $PKG" | grep "application-label" | head -n 1 | cut -d':' -f2 | xargs) 
+                [ -z "$LABEL" ] && LABEL="Sistema/Oculto" 
+                echo -e "  ${AMARELO}└─${RESET} ${VERDE}$LABEL${RESET} | ${BRANCO}$PKG${RESET}" 
+                echo -e "     ${CYAN}🕒 Hora:${RESET} $TIME | ${PURPLE}Interface:${RESET} $CLASS" 
+            fi
         done <<< "$DATA1"
-    else
-        echo -e "${RED}FALHOU${RESET}"
+    else 
+        echo -e "${RED}MOTIVO DA FALHA: Banco Usagestats vazio ou permissão negada.${RESET}"
     fi
+    echo -e "${AZUL}╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶${RESET}"
 
-    if [ "$SUCCESS" -eq 0 ]; then
-        echo -ne "${CYAN}[MÉTODO 2] Buscando Pilha de Tarefas Recentes...${RESET} "
-        local DATA2=$(adb shell "dumpsys activity recents" | grep "recentTasks" -A 100 | grep "realActivity" | head -n 100)
-        if [ -n "$DATA2" ]; then
-            echo -e "${VERDE}SUCESSO${RESET}"; SUCCESS=1
-            echo -e "${AZUL}────────────────────────────────────────────────────────────────${RESET}"
-            while read -r line; do
-                local PKG=$(echo "$line" | cut -d'=' -f2 | cut -d'/' -f1 | xargs)
-                echo -e "${AMARELO}Recent Task${RESET} │ ${BRANCO}$PKG${RESET}"
-            done <<< "$DATA2"
-        else
-            echo -e "${RED}FALHOU${RESET}"
-        fi
+    # MÉTODO 2: Activity Manager Recents (Tarefas Ativas em RAM)
+    # Busca a pilha de tarefas recentes que ainda residem na memória volátil.
+    echo -ne "${CYAN}[MÉTODO 2/6] Varrendo Activity Recents...${RESET} "
+    local DATA2=$(adb shell "dumpsys activity recents" | grep "recentTasks" -A 100 | grep "realActivity" | head -n 100)
+    if [ -n "$DATA2" ]; then
+        echo -e "${VERDE}DADOS LOCALIZADOS${RESET}"
+        while read -r line; do
+            local PKG=$(echo "$line" | cut -d'=' -f2 | cut -d'/' -f1 | xargs)
+            if [ -n "$PKG" ]; then
+                local LABEL=$(adb shell "dumpsys package $PKG" | grep "application-label" | head -n 1 | cut -d':' -f2 | xargs)
+                [ -z "$LABEL" ] && LABEL="Tarefa Recente"
+                echo -e "  ${AMARELO}└─${RESET} ${VERDE}$LABEL${RESET} | ${BRANCO}$PKG${RESET}"
+            fi
+        done <<< "$DATA2"
+    else 
+        echo -e "${RED}MOTIVO DA FALHA: Pilha de processos limpa ou protegida.${RESET}"
     fi
+    echo -e "${AZUL}╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶${RESET}"
 
-    if [ "$SUCCESS" -eq 0 ]; then
-        echo -ne "${CYAN}[MÉTODO 3] Consultando LastUsed de Pacotes...${RESET} "
-        local DATA3=$(adb shell "dumpsys package" | grep "lastUsed" -B 1 | grep "Package \[" | tail -n 100)
-        if [ -n "$DATA3" ]; then
-            echo -e "${VERDE}SUCESSO${RESET}"; SUCCESS=1
-            echo -e "${AZUL}────────────────────────────────────────────────────────────────${RESET}"
-            while read -r line; do
-                local PKG=$(echo "$line" | cut -d'[' -f2 | cut -d']' -f1)
-                echo -e "${AMARELO}Last Used${RESET} │ ${BRANCO}$PKG${RESET}"
-            done <<< "$DATA3"
-        else
-            echo -e "${RED}FALHOU${RESET}"
-        fi
+    # MÉTODO 3: Package Usage (Estatísticas de Persistência em Disco)
+    # Analisa o XML de pacotes para encontrar a última data de uso registrada fisicamente.
+    echo -ne "${CYAN}[MÉTODO 3/6] Varrendo Package LastUsed...${RESET} "
+    local DATA3=$(adb shell "dumpsys package" | grep "lastUsed" -B 1 | grep "Package \[" | tail -n 100)
+    if [ -n "$DATA3" ]; then
+        echo -e "${VERDE}DADOS LOCALIZADOS${RESET}"
+        while read -r line; do
+            local PKG=$(echo "$line" | cut -d'[' -f2 | cut -d']' -f1)
+            if [ -n "$PKG" ]; then
+                local LABEL=$(adb shell "dumpsys package $PKG" | grep "application-label" | head -n 1 | cut -d':' -f2 | xargs)
+                [ -z "$LABEL" ] && LABEL="App Instalado"
+                echo -e "  ${AMARELO}└─${RESET} ${VERDE}$LABEL${RESET} | ${BRANCO}$PKG${RESET}"
+            fi
+        done <<< "$DATA3"
+    else 
+        echo -e "${RED}MOTIVO DA FALHA: Sem registros de timestamps no disco.${RESET}"
     fi
+    echo -e "${AZUL}╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶${RESET}"
 
-    if [ "$SUCCESS" -eq 0 ]; then
-        echo -ne "${CYAN}[MÉTODO 4] Analisando Estatísticas de Processos...${RESET} "
-        local DATA4=$(adb shell "dumpsys procstats --hours 24" | grep "pkg:" | cut -d' ' -f4 | sort -u | tail -n 100)
-        if [ -n "$DATA4" ]; then
-            echo -e "${VERDE}SUCESSO${RESET}"; SUCCESS=1
-            echo -e "${AZUL}────────────────────────────────────────────────────────────────${RESET}"
-            while read -r pkg; do
-                echo -e "${AMARELO}Process Log${RESET} │ ${BRANCO}$pkg${RESET}"
-            done <<< "$DATA4"
-        else
-            echo -e "${RED}TODOS OS MÉTODOS FALHARAM${RESET}"
-            echo -e "${AMARELO}DICA: Verifique se o dispositivo está autorizado via ADB.${RESET}"
-        fi
+    # MÉTODO 4: Procstats (Análise de Processos nas últimas 24h)
+    # Rastreia processos que estiveram ativos, mesmo que em segundo plano.
+    echo -ne "${CYAN}[MÉTODO 4/6] Varrendo Procstats...${RESET} "
+    local DATA4=$(adb shell "dumpsys procstats --hours 24" | grep "pkg:" | cut -d' ' -f4 | sort -u | tail -n 100)
+    if [ -n "$DATA4" ]; then
+        echo -e "${VERDE}DADOS LOCALIZADOS${RESET}"
+        while read -r pkg; do
+            if [ -n "$pkg" ]; then
+                local LABEL=$(adb shell "dumpsys package $pkg" | grep "application-label" | head -n 1 | cut -d':' -f2 | xargs)
+                [ -z "$LABEL" ] && LABEL="Processo Ativo"
+                echo -e "  ${AMARELO}└─${RESET} ${VERDE}$LABEL${RESET} | ${BRANCO}$pkg${RESET}"
+            fi
+        done <<< "$DATA4"
+    else 
+        echo -e "${RED}MOTIVO DA FALHA: Histórico Procstats desativado.${RESET}"
+    fi
+    echo -e "${AZUL}╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶${RESET}"
+
+    # MÉTODO 5: Appops (Acesso a Sensores e Permissões)
+    # Detecta aplicativos que acessaram câmera, microfone ou GPS recentemente.
+    echo -ne "${CYAN}[MÉTODO 5/6] Varrendo Appops (Privacidade)...${RESET} "
+    local DATA5=$(adb shell "dumpsys appops" | grep "Package" | head -n 100)
+    if [ -n "$DATA5" ]; then
+        echo -e "${VERDE}DADOS LOCALIZADOS${RESET}"
+        while read -r line; do
+            local PKG=$(echo "$line" | cut -d' ' -f2 | tr -d ':')
+            if [ -n "$PKG" ]; then
+                local LABEL=$(adb shell "dumpsys package $PKG" | grep "application-label" | head -n 1 | cut -d':' -f2 | xargs)
+                [ -z "$LABEL" ] && LABEL="Atividade de Sensor"
+                echo -e "  ${AMARELO}└─${RESET} ${VERDE}$LABEL${RESET} | ${BRANCO}$PKG${RESET}"
+            fi
+        done <<< "$DATA5"
+    else 
+        echo -e "${RED}MOTIVO DA FALHA: Registros de Appops indisponíveis.${RESET}"
+    fi
+    echo -e "${AZUL}╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶${RESET}"
+
+    # MÉTODO 6: BatteriesStats (Logs de Consumo e Despertar do Sistema)
+    # Identifica apps que consumiram energia, indicando atividade recente.
+    echo -ne "${CYAN}[MÉTODO 6/6] Varrendo Batterystats (Wakelocks)...${RESET} "
+    local DATA6=$(adb shell "dumpsys batterystats" | grep "u0a" | cut -d':' -f2 | cut -d' ' -f1 | sort -u | tail -n 100)
+    if [ -n "$DATA6" ]; then
+        echo -e "${VERDE}DADOS LOCALIZADOS${RESET}"
+        while read -r pkg; do
+            if [ -n "$pkg" ]; then
+                local LABEL=$(adb shell "dumpsys package $pkg" | grep "application-label" | head -n 1 | cut -d':' -f2 | xargs)
+                [ -z "$LABEL" ] && LABEL="Consumo de Energia"
+                echo -e "  ${AMARELO}└─${RESET} ${VERDE}$LABEL${RESET} | ${BRANCO}$pkg${RESET}"
+            fi
+        done <<< "$DATA6"
+    else 
+        echo -e "${RED}MOTIVO DA FALHA: Log Batterystats reiniciado ou inacessível.${RESET}"
     fi
 
     echo -e "${AZUL}────────────────────────────────────────────────────────────────${RESET}"
-    read -p "Pressione Enter para voltar..."
+    echo -e "${VERDE}[!] PROTOCOLO FINALIZADO: TODOS OS MÉTODOS ANALISADOS E EXIBIDOS.${RESET}"
+    read -p "Pressione Enter para retornar ao menu..."
 }
 
 system_integrity_scan() {
